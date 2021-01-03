@@ -1,0 +1,39 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Globals:
+  Function:
+    Runtime: python3.8
+    Timeout: 180
+    Handler: index.lambda_handler
+    Environment:
+      Variables:
+        TABLE_NAME: data-table
+Resources:
+  MyLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: s3://ians-cf-templates/pytest-sample-artifacts/5eadc5568cd6af48e152389af07987f6
+      CompatibleRuntimes:
+      - python3.8
+  CreateThumbnail:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: s3://ians-cf-templates/pytest-sample-artifacts/6f5d23c95c4e7b78bbe89f07355562af
+      Policies: AWSLambdaExecute
+      Events:
+        CreateThumbnailEvent:
+          Type: S3
+          Properties:
+            Bucket:
+              Ref: SourceBucket
+            Events: s3:ObjectCreated:*
+      Environment:
+        Variables:
+          DestinationBucket:
+            Ref: DestinationBucket
+      Layers:
+      - Ref: MyLayer
+  SourceBucket:
+    Type: AWS::S3::Bucket
+  DestinationBucket:
+    Type: AWS::S3::Bucket
