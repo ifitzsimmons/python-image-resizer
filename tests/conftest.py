@@ -1,12 +1,11 @@
 from os.path import abspath, dirname, join
 import os
 import sys
-
+from io import StringIO
 import pytest
 
 lambda_path = join(dirname(abspath(__file__)), '../lambda')
 sys.path.insert(0, lambda_path)
-
 os.environ['ENV'] = "TEST"
 
 @pytest.fixture()
@@ -36,7 +35,7 @@ def s3_trigger_event() -> dict:
 
 @pytest.fixture()
 def mock_s3_get():
-    return dict(Body='jhigahjdshjk')
+    return dict(Body=StringIO('jhigahjdshjk'))
 
 
 @pytest.fixture()

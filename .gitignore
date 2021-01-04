@@ -1,0 +1,4 @@
+template.pkg.yaml
+__pycache__
+.pytest_cache
+.tox

@@ -3,23 +3,6 @@ from unittest.mock import  Mock, patch
 
 from CreateThumbnail.index import lambda_handler
 
-class MockBotoClient:
-    def get_object(self):
-        return {}
-    def put_object(self):
-        return {
-          'Expiration': 'string',
-          'ETag': 'string',
-          'VersionId': 'string',
-          'SSECustomerAlgorithm': 'string',
-          'SSECustomerKeyMD5': 'string',
-          'SSEKMSKeyId': 'string',
-          'SSEKMSEncryptionContext': 'string',
-          'BucketKeyEnabled': False,
-          'RequestCharged': 'requester'
-          }
-
-atrs = {'put_object.return_value': {}, 'get_object.return_value': {'Body': 'sadas'}}
 @patch('CreateThumbnail.index.resize_image')
 @patch.object(boto3, 'client')
 def test_lambda_handler(

@@ -12,6 +12,7 @@ if os.environ.get('ENV') != "TEST":
     s3 = boto3.client('s3')
 
 def get_source_and_dest_info(s3_object: dict) -> List[str]:
+    """Get information about the uploaded file"""
     source_bucket: str = s3_object['bucket']['name']
 
     # Object key may have spaces or unicode non-ASCII characters.
@@ -22,25 +23,21 @@ def get_source_and_dest_info(s3_object: dict) -> List[str]:
     return [source_bucket, src_key, dst_key]
 
 def resize_image(image_body: bytes, image_type):
-    # set thumbnail width. Resize will set the height automatically to maintain aspect ratio.
-    size  = (200,200)
-    # size_split = size.split('x')
+    """Resets thumbnail size to specified size"""
     try:
         img = Image.open(BytesIO(image_body))
-        # size = img.size
+        size  = tuple([int(size/5) for size in img.size])
         img = img.resize(size, Image.ANTIALIAS)
 
         mybuffer = BytesIO()
         img.save(mybuffer, format=image_type.upper())
         mybuffer.seek(0)
         return mybuffer
-    except Exception as e:
-        print(f'raise an exception of type {type(e)} while resizing image')
-        raise e
+    except Exception as ex:
+        print(f'raise an exception of type {type(ex).__name__} while resizing image')
+        raise ex
 
 def lambda_handler(event, context):
-    print(os.listdir('/opt'))
-    # Read options from the event parameter.
     print(f'EVENT:\n', event)
 
     # This is not production code, this is a hack to make this example's tests work
@@ -72,6 +69,7 @@ def lambda_handler(event, context):
     if not image_body:
         raise Exception('Something went wrong, image does not exist')
 
+    # Resize image
     resized = resize_image(image_body, imageType)
 
     # Upload the thumbnail image to the destination bucket
@@ -81,7 +79,6 @@ def lambda_handler(event, context):
       'Body': resized,
       'ContentType': 'image'
     }
-
     putResult: dict = s3.put_object(**destparams)
 
     print(
