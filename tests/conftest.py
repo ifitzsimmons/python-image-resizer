@@ -1,13 +1,12 @@
 from os.path import abspath, dirname, join
 import os
 import sys
-
+from io import StringIO
 import pytest
 
 lambda_path = join(dirname(abspath(__file__)), '../lambda')
 sys.path.insert(0, lambda_path)
-
-os.environ['ENV'] = "TEST"
+os.environ['DestinationBucket'] = 'DstBucket'
 
 @pytest.fixture()
 def s3_get_object_return() -> dict:
@@ -21,12 +20,8 @@ def s3_trigger_event() -> dict:
       "Records": [
         {
           "s3": {
-            "bucket": {
-              "name": "srcBucket",
-            },
-            "object": {
-              "key": "srcKey.png",
-            }
+            "bucket": {"name": "srcBucket"},
+            "object": {"key": "srcKey.png"}
           }
         }
       ]
@@ -36,19 +31,5 @@ def s3_trigger_event() -> dict:
 
 @pytest.fixture()
 def mock_s3_get():
-    return dict(Body='jhigahjdshjk')
+    return dict(Body=StringIO('jhigahjdshjk'))
 
-
-@pytest.fixture()
-def mock_s3_put():
-    return {
-      'Expiration': 'string',
-      'ETag': 'string',
-      'VersionId': 'string',
-      'SSECustomerAlgorithm': 'string',
-      'SSECustomerKeyMD5': 'string',
-      'SSEKMSKeyId': 'string',
-      'SSEKMSEncryptionContext': 'string',
-      'BucketKeyEnabled': False,
-      'RequestCharged': 'requester'
-    }
