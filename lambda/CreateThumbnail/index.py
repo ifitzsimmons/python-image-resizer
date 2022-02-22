@@ -1,32 +1,100 @@
 import boto3
+import logging
 import re
 import os
 
 from io import BytesIO
 from PIL import Image
-from typing import List, Optional
+from typing import Optional
 
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+s3 = boto3.client('s3')
 
-s3 = None
-if os.environ.get('ENV') != "TEST":
-    s3 = boto3.client('s3')
+SUPPORTED_IMG_TYPES = ['jpg', 'jpeg', 'png']
+DESTINATION_BUCKET = os.environ['DestinationBucket']
 
-def get_source_and_dest_info(s3_object: dict) -> List[str]:
-    """Get information about the uploaded file"""
-    source_bucket: str = s3_object['bucket']['name']
+# raises indexError and AssertionError
+def get_image_type(src_key: str) -> str:
+    """Returns image type if it is valid
+
+    Verifies that the type of image uploaded to S3 is a supported image type
+
+    Args:
+      src_key: File name from S3
+
+    Returns:
+      image_type: Type of image uploaded to s3, lowercased.
+
+    Raises:
+      IndexError: If the file does not have a file extension
+      AssertionError: If the file type is not supported
+
+    >>> get_image_type('test.png')
+    'png'
+
+    >>> get_image_type('test')
+    Traceback (most recent call last):
+    AssertionError
+
+    >>> get_image_type('test.txt')
+    Traceback (most recent call last):
+    AssertionError: Unsupported image type: 'txt'
+    """
+    # Infer the image type from the file suffix.
+    type_match: Optional[re.Match] = re.search(r'\.([^.]*)$', src_key)
+
+    try:
+      assert type_match
+      image_type: str = type_match[1].lower()
+    except Exception as e:
+      logger.exception(f'Unable to retrieve image type from file: {src_key}', exc_info=e)
+      raise e
+
+    assert image_type in SUPPORTED_IMG_TYPES, f"Unsupported image type: '{image_type}'"
+    return image_type
+
+def get_resized_image_key(src_key: str, image_type: str) -> str:
+    """Get information about the uploaded file and rename
+
+    Args:
+      src_key: Name of the uploaded file
+      image_type: Type of image.
+
+    Returns:
+      dst_key: renamed image file
+
+    Raises:
+      TypeError: When file name has unexpected pattern
+
+    >>> get_resized_image_key('key+ as.png.png', 'png')
+    'key+ as.png-thumbnail.png'
+
+    >>> get_resized_image_key('key+ as', 'png')
+    Traceback (most recent call last):
+    AssertionError
+    """
+    pattern = re.compile(f'.*(?=\\.{image_type}$)')
 
     # Object key may have spaces or unicode non-ASCII characters.
-    src_key: str   = s3_object['object']['key']
-    src_key = re.sub(r'/\+/g', ' ', src_key)
-    dst_key: str  = f'resized-{src_key}'
+    src_key_match = re.match(pattern, src_key)
 
-    return [source_bucket, src_key, dst_key]
+    try:
+      assert src_key_match
+      file_name = src_key_match[0]
+    except Exception as e:
+      logger.exception(f'Unable to retrieve image data from file: {src_key}', exc_info=e)
+      raise e
 
-def resize_image(image_body: bytes, image_type):
+    dst_key: str  = f'{file_name}-thumbnail.{image_type}'
+
+    return dst_key
+
+def resize_image(image_body: bytes, image_type: str):
     """Resets thumbnail size to specified size"""
     try:
         img = Image.open(BytesIO(image_body))
-        size  = tuple([int(size/5) for size in img.size])
+        size = tuple([int(size/5) for size in img.size])
         img = img.resize(size, Image.ANTIALIAS)
 
         mybuffer = BytesIO()
@@ -34,56 +102,43 @@ def resize_image(image_body: bytes, image_type):
         mybuffer.seek(0)
         return mybuffer
     except Exception as ex:
-        print(f'raise an exception of type {type(ex).__name__} while resizing image')
+        logger.exception('Could not resize image')
         raise ex
+
+def upload_resized_image(dst_key: str, resized: BytesIO):
+    destparams = {
+        'Bucket': DESTINATION_BUCKET,
+        'Key': dst_key,
+        'Body': resized,
+        'ContentType': 'image'
+      }
+    s3.put_object(**destparams)
 
 def lambda_handler(event, context):
     print(f'EVENT:\n', event)
 
-    # This is not production code, this is a hack to make this example's tests work
-    global s3
-    if not s3:
-      s3 = boto3.client('s3')
+    s3_object: dict = event['Records'][0]['s3']
+    src_key = s3_object['object']['key']
+    src_bucket = s3_object['bucket']['name']
+    image_type = get_image_type(src_key)
+    resized_key = get_resized_image_key(src_key, image_type)
 
-    src_bckt, src_key, dst_key = get_source_and_dest_info(event['Records'][0]['s3'])
-    dst_bucket: Optional[str] = os.environ.get('DestinationBucket')
+    try:
+        orig_image: dict = s3.get_object(Bucket=src_bucket, Key=src_key)
+        image_body: bytes = orig_image['Body'].read()
+    except KeyError as ex:
+        logger.exception('Something went wrong, image does not exist')
+        raise ex
 
-    # Infer the image type from the file suffix.
-    typeMatch: Optional[re.Match] = re.search(r'\.([^.]*)$', src_key)
-    if not typeMatch:
-        raise Exception('Could not determine the image type.')
+    resized_image_bytes = resize_image(image_body, image_type)
+    upload_resized_image(resized_key, resized_image_bytes)
 
-    # Check that the image type is supported
-    imageType: str = typeMatch[1].lower()
-    if imageType not in ['jpg', 'jpeg', 'png']:
-        raise Exception(f'Unsupported image type: {imageType}')
-
-    # Download the image from the S3 source bucket.
-    params = {
-      'Bucket': src_bckt,
-      'Key': src_key
-    }
-    origimage: dict = s3.get_object(**params)
-    image_body: Optional[bytes] = origimage.get('Body').read()
-
-    if not image_body:
-        raise Exception('Something went wrong, image does not exist')
-
-    # Resize image
-    resized = resize_image(image_body, imageType)
-
-    # Upload the thumbnail image to the destination bucket
-    destparams = {
-      'Bucket': dst_bucket,
-      'Key': dst_key,
-      'Body': resized,
-      'ContentType': 'image'
-    }
-    putResult: dict = s3.put_object(**destparams)
-
-    print(
-      f'Successfully resized {src_bckt}/{src_key} '
-      f'and uploaded to {dst_bucket}/{dst_key}'
+    logger.info(
+      f'Successfully resized {src_bucket}/{src_key} '
+      f'and uploaded to {DESTINATION_BUCKET}/{resized_key}'
     )
 
-    return putResult
+    return {
+      'resizedKey': resized_key,
+      's3Location': DESTINATION_BUCKET
+    }
